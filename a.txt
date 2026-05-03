@@ -1,0 +1,43 @@
+BEGIN;
+
+-- Delete duplicate customers (keeps the best one)
+DELETE FROM customers
+WHERE uuid IN (
+  SELECT c2.uuid
+  FROM customers c2
+  WHERE LOWER(c2.company_name) IN (
+    SELECT LOWER(company_name) 
+    FROM customers 
+    GROUP BY LOWER(company_name) 
+    HAVING COUNT(*) > 1
+  )
+  AND c2.uuid NOT IN (
+    SELECT DISTINCT ON (LOWER(c3.company_name))
+      c3.uuid
+    FROM customers c3
+    LEFT JOIN tai_shipments ts3 ON c3.uuid = ts3.crm_customer_uuid
+    WHERE LOWER(c3.company_name) IN (
+      SELECT LOWER(company_name) 
+      FROM customers 
+      GROUP BY LOWER(company_name) 
+      HAVING COUNT(*) > 1
+    )
+    GROUP BY c3.uuid, c3.company_name, c3.source, c3.created_at
+    ORDER BY 
+      LOWER(c3.company_name),
+      COUNT(ts3.uuid) DESC,
+      CASE c3.source 
+        WHEN 'Tai Software' THEN 1 
+        WHEN 'Website' THEN 2 
+        ELSE 3 
+      END ASC,
+      c3.created_at ASC
+  )
+);
+
+-- Show how many were deleted
+SELECT 'Deleted ' || COUNT(*) || ' duplicate customers' as result
+FROM (VALUES (1)) AS dummy;
+
+COMMIT;
+-- To undo: ROLLBACK;

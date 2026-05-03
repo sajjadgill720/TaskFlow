@@ -1,0 +1,62 @@
+import { createBrowserRouter } from "react-router";
+import LoginPage from "./components/LoginPage";
+import SignUpPage from "./components/SignUpPage";
+import DashboardRoot from "./components/DashboardRoot";
+import DashboardLayout from "./components/DashboardLayout";
+import DashboardHome from "./components/Dashboard";
+import MyEventsPage from "./components/MyEventsPage";
+import SellTicketsPage from "./components/SellTicketsPage";
+import GateScannerPage from "./components/GateScannerPage";
+import AnalyticsPage from "./components/AnalyticsPage";
+import SettingsPage from "./components/SettingsPage";
+import RequireRole from "./components/RequireRole";
+
+export const router = createBrowserRouter([
+  { path: "/", Component: LoginPage },
+  { path: "/signup", Component: SignUpPage },
+  {
+    path: "/dashboard",
+    Component: DashboardRoot,
+    children: [
+      {
+        Component: DashboardLayout,
+        children: [
+          { index: true, Component: DashboardHome },
+          {
+            path: "events",
+            element: (
+              <RequireRole allow={["organizer", "admin"]}>
+                <MyEventsPage />
+              </RequireRole>
+            ),
+          },
+          {
+            path: "sell-tickets",
+            element: (
+              <RequireRole allow={["organizer", "admin"]}>
+                <SellTicketsPage />
+              </RequireRole>
+            ),
+          },
+          {
+            path: "gate-scanner",
+            element: (
+              <RequireRole allow={["organizer", "admin"]}>
+                <GateScannerPage />
+              </RequireRole>
+            ),
+          },
+          {
+            path: "analytics",
+            element: (
+              <RequireRole allow={["organizer", "admin"]}>
+                <AnalyticsPage />
+              </RequireRole>
+            ),
+          },
+          { path: "settings", Component: SettingsPage },
+        ],
+      },
+    ],
+  },
+]);

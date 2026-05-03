@@ -1,0 +1,34 @@
+node_modules/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Build output
+dist/
+build/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Coverage and test artifacts
+coverage/
+*.lcov
+
+# Cache and temp
+.cache/
+.parcel-cache/
+.turbo/
+.vite/
+tmp/
+temp/
+
+# Editor/system
+.DS_Store
+Thumbs.db
+
