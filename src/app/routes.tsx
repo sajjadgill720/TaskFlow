@@ -12,6 +12,7 @@ import AnalyticsPage from "./components/AnalyticsPage";
 import SettingsPage from "./components/SettingsPage";
 import ExplorePage from "./components/ExplorePage";
 import AttendeeEventDetailPage from "./components/AttendeeEventDetailPage";
+import AdminOrganizersPage from "./components/AdminOrganizersPage";
 import RequireRole from "./components/RequireRole";
 
 export const router = createBrowserRouter([
@@ -28,6 +29,14 @@ export const router = createBrowserRouter([
           { index: true, Component: DashboardHome },
           { path: "explore", Component: ExplorePage },
           { path: "explore/event/:eventId", Component: AttendeeEventDetailPage },
+          {
+            path: "admin/organizers",
+            element: (
+              <RequireRole allow={["admin"]}>
+                <AdminOrganizersPage />
+              </RequireRole>
+            ),
+          },
           {
             path: "events",
             element: (

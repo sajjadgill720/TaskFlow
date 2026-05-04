@@ -1,12 +1,23 @@
 -- TicketFlow — run this in Supabase SQL Editor (full script)
 -- https://supabase.com/dashboard/project/_/sql
+--
+-- Existing projects: prefer incremental files under supabase/migrations/ rather than re-running this whole script.
 
 -- Extensions
 create extension if not exists "pgcrypto";
 
--- Roles stored on profiles mirror app: attendee | organizer | admin
-create type public.event_status as enum ('Active', 'Upcoming', 'Closed');
-create type public.tier_listing_status as enum ('On Sale', 'Sold Out', 'Paused');
+-- Enums (safe to re-run if types already exist from a prior migration or seed)
+do $$ begin
+  create type public.event_status as enum ('Active', 'Upcoming', 'Closed');
+exception
+  when duplicate_object then null;
+end $$;
+
+do $$ begin
+  create type public.tier_listing_status as enum ('On Sale', 'Sold Out', 'Paused');
+exception
+  when duplicate_object then null;
+end $$;
 
 -- Profiles (1:1 with auth.users)
 create table public.profiles (
@@ -46,7 +57,7 @@ create table public.ticket_tiers (
 
 create table public.issued_tickets (
   id uuid primary key default gen_random_uuid(),
-  tier_id uuid not null references public.ticket_tiers (id) on delete restrict,
+  tier_id uuid not null references public.ticket_tiers (id) on delete cascade,
   booking_code text not null unique,
   buyer_name text not null,
   buyer_email text not null,
@@ -243,6 +254,16 @@ create policy "issued_insert_organizer"
 
 create policy "issued_update_checkin"
   on public.issued_tickets for update
+  using (
+    exists (
+      select 1 from public.ticket_tiers tt
+      join public.events e on e.id = tt.event_id
+      where tt.id = tier_id and (e.organizer_id = auth.uid() or public.is_admin())
+    )
+  );
+
+create policy "issued_delete_organizer"
+  on public.issued_tickets for delete
   using (
     exists (
       select 1 from public.ticket_tiers tt

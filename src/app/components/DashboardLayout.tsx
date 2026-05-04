@@ -14,6 +14,7 @@ import {
   Menu,
   Loader2,
   Compass,
+  Building2,
 } from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
 import { navAllowedForRole } from "../auth/rbac";
@@ -24,6 +25,7 @@ const F = "Nunito, sans-serif";
 const sidebarItems = [
   { icon: LayoutDashboard, label: "Dashboard", path: "/dashboard", key: "dashboard" as const },
   { icon: Compass, label: "Explore", path: "/dashboard/explore", key: "explore" as const },
+  { icon: Building2, label: "Organizers", path: "/dashboard/admin/organizers", key: "adminOrganizers" as const },
   { icon: CalendarDays, label: "My Events", path: "/dashboard/events", key: "events" as const },
   { icon: ShoppingCart, label: "Sell Tickets", path: "/dashboard/sell-tickets", key: "sellTickets" as const },
   { icon: ScanLine, label: "Gate Scanner", path: "/dashboard/gate-scanner", key: "gateScanner" as const },
@@ -34,6 +36,7 @@ const sidebarItems = [
 const navLinkMap: { label: string; path: string; key: keyof ReturnType<typeof navAllowedForRole> }[] = [
   { label: "Dashboard", path: "/dashboard", key: "dashboard" },
   { label: "Explore", path: "/dashboard/explore", key: "explore" },
+  { label: "Organizers", path: "/dashboard/admin/organizers", key: "adminOrganizers" },
   { label: "My Events", path: "/dashboard/events", key: "events" },
   { label: "Tickets", path: "/dashboard/sell-tickets", key: "sellTickets" },
   { label: "Analytics", path: "/dashboard/analytics", key: "analytics" },
@@ -70,6 +73,7 @@ export default function DashboardLayout() {
 
   const isActive = (path: string) => {
     if (path === "/dashboard") return location.pathname === "/dashboard";
+    if (path === "/dashboard/explore") return location.pathname.startsWith("/dashboard/explore");
     return location.pathname.startsWith(path);
   };
 

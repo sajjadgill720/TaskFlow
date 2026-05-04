@@ -8,6 +8,7 @@ export function navAllowedForRole(role: AppRole | undefined): {
   gateScanner: boolean;
   analytics: boolean;
   settings: boolean;
+  adminOrganizers: boolean;
 } {
   const staff = role === "organizer" || role === "admin";
   const attendee = role === "attendee" || role === "admin";
@@ -19,5 +20,6 @@ export function navAllowedForRole(role: AppRole | undefined): {
     gateScanner: staff,
     analytics: staff,
     settings: true,
+    adminOrganizers: role === "admin",
   };
 }

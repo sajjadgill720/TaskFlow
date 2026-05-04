@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { motion } from "motion/react";
-import { Plus, Search, MapPin, CalendarDays, X, Sparkles, Loader2, Link2 } from "lucide-react";
+import { Plus, Search, MapPin, CalendarDays, X, Sparkles, Loader2, Link2, Trash2 } from "lucide-react";
 import { format, parseISO } from "date-fns";
 import { toast } from "sonner";
 import { apiUrl } from "../../lib/apiBaseUrl";
@@ -75,6 +75,8 @@ export default function MyEventsPage() {
   const [tiers, setTiers] = useState<TicketTier[]>(defaultTiers);
   const [publishing, setPublishing] = useState(false);
   const [inviteBusyId, setInviteBusyId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<EventItem | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!isSupabaseConfigured || !user) return;
@@ -160,6 +162,23 @@ export default function MyEventsPage() {
     await load();
     } finally {
       setPublishing(false);
+    }
+  };
+
+  const confirmDeleteEvent = async () => {
+    if (!deleteTarget || deletingId) return;
+    setDeletingId(deleteTarget.id);
+    try {
+      const { error } = await supabase.from("events").delete().eq("id", deleteTarget.id);
+      if (error) {
+        toast.error(error.message);
+        return;
+      }
+      toast.success("Event deleted");
+      setDeleteTarget(null);
+      await load();
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -290,6 +309,20 @@ export default function MyEventsPage() {
               <Link2 size={14} aria-hidden />
               {inviteBusyId === ev.id ? "Creating link…" : "Copy attendee invite link (single event)"}
             </button>
+            <button
+              type="button"
+              disabled={deletingId === ev.id}
+              onClick={() => setDeleteTarget(ev)}
+              className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border-2 border-red-100 bg-red-50/80 py-2.5 text-xs text-red-700 transition-colors hover:bg-red-100 disabled:opacity-50"
+              style={{ fontWeight: 700 }}
+            >
+              {deletingId === ev.id ? (
+                <Loader2 size={14} className="animate-spin" aria-hidden />
+              ) : (
+                <Trash2 size={14} aria-hidden />
+              )}
+              {deletingId === ev.id ? "Deleting…" : "Delete event"}
+            </button>
           </motion.div>
         ))}
       </div>
@@ -298,6 +331,52 @@ export default function MyEventsPage() {
         <div className="text-center py-16 text-sm" style={{ color: "#9CA3AF", fontWeight: 600 }}>
           <Sparkles size={32} className="mx-auto mb-3 text-amber-300" />
           No events found.
+        </div>
+      )}
+
+      {deleteTarget && (
+        <div
+          role="presentation"
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/45 p-4 backdrop-blur-sm"
+          onClick={() => !deletingId && setDeleteTarget(null)}
+        >
+          <motion.div
+            initial={{ opacity: 0, scale: 0.96 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl"
+            style={{ boxShadow: "0 20px 60px rgba(0,0,0,0.18)" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 className="text-lg" style={{ color: "#78350F", fontWeight: 800 }}>
+              Delete event?
+            </h2>
+            <p className="mt-3 text-sm leading-relaxed" style={{ color: "#57534E", fontWeight: 500 }}>
+              <strong style={{ color: "#78350F" }}>{deleteTarget.name}</strong> will be removed permanently. All ticket tiers,
+              invite links, grants for this event, and every issued ticket (sold bookings and QR codes) will be deleted.
+              This cannot be undone.
+            </p>
+            <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                disabled={!!deletingId}
+                onClick={() => setDeleteTarget(null)}
+                className="rounded-xl border-2 px-4 py-2.5 text-sm disabled:opacity-50"
+                style={{ borderColor: "#FDE68A", color: "#92400E", fontWeight: 700 }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={!!deletingId}
+                onClick={() => void confirmDeleteEvent()}
+                className="inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm text-white disabled:opacity-50"
+                style={{ background: "linear-gradient(135deg, #DC2626, #EF4444)", fontWeight: 700 }}
+              >
+                {deletingId ? <Loader2 size={16} className="animate-spin" aria-hidden /> : <Trash2 size={16} aria-hidden />}
+                {deletingId ? "Deleting…" : "Delete permanently"}
+              </button>
+            </div>
+          </motion.div>
         </div>
       )}
 
