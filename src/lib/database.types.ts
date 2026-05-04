@@ -114,6 +114,57 @@ export interface Database {
           checked_in_at?: string | null;
         };
       };
+      organizer_subscriptions: {
+        Row: {
+          id: string;
+          subscriber_id: string;
+          organizer_id: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          subscriber_id: string;
+          organizer_id: string;
+          created_at?: string;
+        };
+        Update: Record<string, never>;
+      };
+      attendee_event_grants: {
+        Row: {
+          id: string;
+          subscriber_id: string;
+          event_id: string;
+          source: "invite";
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          subscriber_id: string;
+          event_id: string;
+          source?: "invite";
+          created_at?: string;
+        };
+        Update: Record<string, never>;
+      };
+      event_invite_tokens: {
+        Row: {
+          id: string;
+          event_id: string;
+          token: string;
+          created_at: string;
+          expires_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          event_id: string;
+          token: string;
+          created_at?: string;
+          expires_at?: string | null;
+        };
+        Update: {
+          expires_at?: string | null;
+        };
+      };
     };
   };
 }

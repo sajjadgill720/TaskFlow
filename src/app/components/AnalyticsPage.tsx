@@ -135,13 +135,13 @@ export default function AnalyticsPage() {
       <p className="text-sm mb-7" style={{ color: "#9CA3AF", fontWeight: 500 }}>Track your event performance from issued tickets</p>
       {loading && <p className="text-sm mb-4" style={{ color: "#9CA3AF", fontWeight: 600 }}>Loading analytics…</p>}
 
-      <div className="flex gap-1 p-1.5 rounded-xl mb-7 w-fit" style={{ backgroundColor: "#FEF3C7" }}>
+      <div className="mb-7 flex w-full max-w-full flex-wrap gap-1 rounded-xl p-1.5 sm:w-fit" style={{ backgroundColor: "#FEF3C7" }}>
         {tabs.map((t) => (
           <button
             key={t}
             type="button"
             onClick={() => setTab(t)}
-            className="px-5 py-2.5 rounded-lg text-sm cursor-pointer transition-all"
+            className="min-h-[44px] flex-1 cursor-pointer rounded-lg px-4 py-2.5 text-sm transition-all sm:flex-none sm:px-5"
             style={{
               fontWeight: 700,
               backgroundColor: tab === t ? "#D97706" : "transparent",
@@ -210,7 +210,7 @@ export default function AnalyticsPage() {
                 </ResponsiveContainer>
               </div>
             </div>
-            <div className="bg-white rounded-2xl p-6 max-w-md" style={{ boxShadow: "0 2px 20px rgba(120,53,15,0.06)" }}>
+            <div className="mx-auto w-full max-w-md rounded-2xl bg-white p-5 sm:p-6 lg:mx-0" style={{ boxShadow: "0 2px 20px rgba(120,53,15,0.06)" }}>
               <h2 className="text-sm mb-2" style={{ color: "#78350F", fontWeight: 800 }}>Placeholder categories</h2>
               <p className="text-xs mb-3" style={{ color: "#9CA3AF", fontWeight: 500 }}>Categorize events in the database to replace this chart.</p>
               <ResponsiveContainer width="100%" height={220}>

@@ -32,7 +32,7 @@ type AuthContextValue = {
     password: string;
     fullName: string;
     role: AppRole;
-  }) => Promise<{ error: Error | null }>;
+  }) => Promise<{ error: Error | null; session: Session | null }>;
   signOut: () => Promise<void>;
 };
 
@@ -123,7 +123,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!isSupabaseConfigured) {
         return { error: new Error("Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to .env.local") };
       }
-      const { error } = await supabase.auth.signUp({
+      const { data, error } = await supabase.auth.signUp({
         email: input.email,
         password: input.password,
         options: {
@@ -133,7 +133,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           },
         },
       });
-      return { error: error ? new Error(error.message) : null };
+      return {
+        error: error ? new Error(error.message) : null,
+        session: data.session ?? null,
+      };
     },
     []
   );

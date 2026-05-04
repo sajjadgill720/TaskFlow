@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
-import { useNavigate, Link } from "react-router";
-import { Eye, EyeOff, Ticket, Rocket, Star, Heart } from "lucide-react";
+import { useState, useEffect, useMemo } from "react";
+import { useNavigate, Link, useSearchParams } from "react-router";
+import { Eye, EyeOff, Heart, Loader2, Rocket, Star, Ticket } from "lucide-react";
 import { motion } from "motion/react";
 import { toast } from "sonner";
 import { useAuth } from "../auth/AuthContext";
@@ -8,6 +8,12 @@ import type { AppRole } from "../../lib/database.types";
 
 const roles = ["Attendee", "Organizer", "Admin"] as const;
 const F = "Nunito, sans-serif";
+
+function safeAppPath(path: string | null | undefined, fallback: string): string {
+  const p = path?.trim();
+  if (!p || !p.startsWith("/") || p.startsWith("//")) return fallback;
+  return p;
+}
 
 function uiRoleToAppRole(r: (typeof roles)[number]): AppRole {
   if (r === "Attendee") return "attendee";
@@ -17,6 +23,13 @@ function uiRoleToAppRole(r: (typeof roles)[number]): AppRole {
 
 export default function SignUpPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const redirectParam = searchParams.get("redirect");
+  const postAuthPath = safeAppPath(redirectParam, "/");
+  const isInviteFlow = useMemo(
+    () => Boolean(redirectParam?.trim().startsWith("/invite/")),
+    [redirectParam],
+  );
   const { signUp, session, loading: authLoading } = useAuth();
   const [role, setRole] = useState<string>("Attendee");
   const [showPassword, setShowPassword] = useState(false);
@@ -25,32 +38,54 @@ export default function SignUpPage() {
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
+    if (isInviteFlow) setRole("Attendee");
+  }, [isInviteFlow]);
+
+  useEffect(() => {
     if (!authLoading && session) {
-      navigate("/dashboard", { replace: true });
+      navigate(postAuthPath, { replace: true });
     }
-  }, [authLoading, session, navigate]);
+  }, [authLoading, session, navigate, postAuthPath]);
 
   const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submitting) return;
     if (form.password !== form.confirm) {
       toast.error("Passwords do not match");
       return;
     }
     setSubmitting(true);
-    const uiRole = roles.includes(role as (typeof roles)[number]) ? (role as (typeof roles)[number]) : "Attendee";
-    const { error } = await signUp({
-      email: form.email.trim(),
-      password: form.password,
-      fullName: form.name.trim(),
-      role: uiRoleToAppRole(uiRole),
-    });
-    setSubmitting(false);
-    if (error) {
-      toast.error(error.message);
-      return;
+    try {
+      const uiRole = isInviteFlow
+        ? "Attendee"
+        : roles.includes(role as (typeof roles)[number])
+          ? (role as (typeof roles)[number])
+          : "Attendee";
+      const { error, session: newSession } = await signUp({
+        email: form.email.trim(),
+        password: form.password,
+        fullName: form.name.trim(),
+        role: uiRoleToAppRole(uiRole),
+      });
+      if (error) {
+        toast.error(error.message);
+        return;
+      }
+      if (isInviteFlow) {
+        if (newSession) {
+          toast.success("Welcome! Accepting your invite…");
+          navigate(postAuthPath);
+        } else {
+          toast.success("Check your email to confirm your account, then sign in — your invite will open automatically.");
+          navigate(`/?redirect=${encodeURIComponent(postAuthPath)}`);
+        }
+        return;
+      }
+      toast.success("Account created. If email confirmation is enabled, check your inbox before signing in.");
+      navigate(postAuthPath);
+    } finally {
+      setSubmitting(false);
     }
-    toast.success("Account created. If email confirmation is enabled, check your inbox before signing in.");
-    navigate("/");
   };
 
   const update = (field: string) => (e: React.ChangeEvent<HTMLInputElement>) =>
@@ -123,7 +158,7 @@ export default function SignUpPage() {
         </motion.div>
       </div>
 
-      <div className="flex-1 flex items-center justify-center p-8 relative" style={{ backgroundColor: "#FFFDF7" }}>
+      <div className="relative flex flex-1 items-center justify-center p-4 sm:p-8" style={{ backgroundColor: "#FFFDF7" }}>
         <div className="absolute inset-0 opacity-[0.03]" style={{ backgroundImage: "radial-gradient(#D97706 1px, transparent 1px)", backgroundSize: "24px 24px" }} />
 
         <motion.div
@@ -132,7 +167,7 @@ export default function SignUpPage() {
           transition={{ duration: 0.6, delay: 0.2 }}
           className="w-full max-w-md relative z-10"
         >
-          <div className="bg-white rounded-3xl p-10" style={{ boxShadow: "0 4px 40px rgba(120,53,15,0.08), 0 1px 3px rgba(0,0,0,0.05)" }}>
+          <div className="rounded-3xl bg-white p-6 sm:p-10" style={{ boxShadow: "0 4px 40px rgba(120,53,15,0.08), 0 1px 3px rgba(0,0,0,0.05)" }}>
             <div className="flex items-center justify-center gap-2 mb-8">
               <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: "linear-gradient(135deg, #D97706, #F59E0B)" }}>
                 <Ticket size={20} className="text-white" />
@@ -144,27 +179,38 @@ export default function SignUpPage() {
               Create Account
             </h3>
             <p className="text-center text-sm mb-7" style={{ color: "#9CA3AF", fontWeight: 500 }}>
-              Choose your role — it controls dashboard access
+              {isInviteFlow
+                ? "Create an attendee account to accept this event invite."
+                : "Choose your role — it controls dashboard access"}
             </p>
 
-            <div className="flex rounded-2xl p-1.5 mb-7" style={{ backgroundColor: "#FEF3C7" }}>
-              {roles.map((r) => (
-                <button
-                  key={r}
-                  type="button"
-                  onClick={() => setRole(r)}
-                  className="flex-1 py-2.5 rounded-xl text-sm transition-all cursor-pointer"
-                  style={{
-                    fontWeight: 700,
-                    backgroundColor: role === r ? "#D97706" : "transparent",
-                    color: role === r ? "#fff" : "#92400E",
-                    boxShadow: role === r ? "0 2px 8px rgba(217,119,6,0.35)" : "none",
-                  }}
-                >
-                  {r}
-                </button>
-              ))}
-            </div>
+            {isInviteFlow ? (
+              <div
+                className="mb-7 rounded-2xl border-2 px-4 py-3 text-center text-sm"
+                style={{ borderColor: "#FDE68A", background: "#FFFBEB", color: "#78350F", fontWeight: 700 }}
+              >
+                Role: Attendee (required for invites)
+              </div>
+            ) : (
+              <div className="mb-7 grid grid-cols-3 gap-1 rounded-2xl p-1.5 sm:flex sm:gap-0" style={{ backgroundColor: "#FEF3C7" }}>
+                {roles.map((r) => (
+                  <button
+                    key={r}
+                    type="button"
+                    onClick={() => setRole(r)}
+                    className="cursor-pointer rounded-xl py-2.5 text-xs transition-all sm:flex-1 sm:text-sm"
+                    style={{
+                      fontWeight: 700,
+                      backgroundColor: role === r ? "#D97706" : "transparent",
+                      color: role === r ? "#fff" : "#92400E",
+                      boxShadow: role === r ? "0 2px 8px rgba(217,119,6,0.35)" : "none",
+                    }}
+                  >
+                    {r}
+                  </button>
+                ))}
+              </div>
+            )}
 
             <form onSubmit={handleSignUp} className="space-y-4">
               {[
@@ -216,9 +262,10 @@ export default function SignUpPage() {
               <button
                 type="submit"
                 disabled={submitting}
-                className="w-full py-3.5 rounded-xl text-white text-sm cursor-pointer transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-60 disabled:pointer-events-none"
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl py-3.5 text-sm text-white transition-all hover:scale-[1.02] active:scale-[0.98] disabled:pointer-events-none disabled:opacity-60"
                 style={{ background: "linear-gradient(135deg, #D97706, #F59E0B)", fontWeight: 700, boxShadow: "0 4px 15px rgba(217,119,6,0.35)" }}
               >
+                {submitting ? <Loader2 size={18} className="animate-spin" aria-hidden /> : null}
                 {submitting ? "Creating account…" : "Sign Up"}
               </button>
             </form>
@@ -231,7 +278,11 @@ export default function SignUpPage() {
 
             <p className="text-center text-sm" style={{ color: "#9CA3AF", fontWeight: 500 }}>
               Already have an account?{" "}
-              <Link to="/" className="hover:underline" style={{ color: "#D97706", fontWeight: 700 }}>
+              <Link
+                to={searchParams.get("redirect") ? `/?redirect=${encodeURIComponent(searchParams.get("redirect")!)}` : "/"}
+                className="hover:underline"
+                style={{ color: "#D97706", fontWeight: 700 }}
+              >
                 Login
               </Link>
             </p>

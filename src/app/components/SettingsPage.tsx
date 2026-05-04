@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { motion } from "motion/react";
-import { Save, User, Bell, Shield, Palette, Check } from "lucide-react";
+import { Save, User, Bell, Shield, Palette, Check, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase, isSupabaseConfigured } from "../../lib/supabase";
 import { useAuth } from "../auth/AuthContext";
@@ -32,6 +32,7 @@ export default function SettingsPage() {
   const { profile, user, refreshProfile } = useAuth();
   const [activeTab, setActiveTab] = useState("Profile");
   const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [profileForm, setProfileForm] = useState({ name: "", phone: "", company: "" });
   const [notifs, setNotifs] = useState<NotifPrefs>({ email: true, push: true, sms: false, marketing: false });
 
@@ -56,27 +57,33 @@ export default function SettingsPage() {
       toast.error("Not signed in or Supabase not configured.");
       return;
     }
-    const preferences = {
-      ...(profile.preferences ?? {}),
-      notifications: notifs,
-    };
-    const { error } = await supabase
-      .from("profiles")
-      .update({
-        full_name: profileForm.name.trim(),
-        phone: profileForm.phone.trim() || null,
-        company: profileForm.company.trim() || null,
-        preferences,
-      })
-      .eq("id", user.id);
-    if (error) {
-      toast.error(error.message);
-      return;
+    if (saving) return;
+    setSaving(true);
+    try {
+      const preferences = {
+        ...(profile.preferences ?? {}),
+        notifications: notifs,
+      };
+      const { error } = await supabase
+        .from("profiles")
+        .update({
+          full_name: profileForm.name.trim(),
+          phone: profileForm.phone.trim() || null,
+          company: profileForm.company.trim() || null,
+          preferences,
+        })
+        .eq("id", user.id);
+      if (error) {
+        toast.error(error.message);
+        return;
+      }
+      await refreshProfile();
+      setSaved(true);
+      toast.success("Settings saved");
+      setTimeout(() => setSaved(false), 2000);
+    } finally {
+      setSaving(false);
     }
-    await refreshProfile();
-    setSaved(true);
-    toast.success("Settings saved");
-    setTimeout(() => setSaved(false), 2000);
   };
 
   const displayEmail = user?.email ?? "—";
@@ -118,7 +125,7 @@ export default function SettingsPage() {
           ))}
         </div>
 
-        <div className="flex-1 bg-white rounded-2xl p-7" style={{ boxShadow: "0 2px 20px rgba(120,53,15,0.06)" }}>
+        <div className="flex-1 rounded-2xl bg-white p-5 sm:p-7" style={{ boxShadow: "0 2px 20px rgba(120,53,15,0.06)" }}>
           {activeTab === "Profile" && (
             <div className="space-y-6">
               <h2 className="text-sm" style={{ color: "#78350F", fontWeight: 800 }}>Profile Information</h2>
@@ -188,8 +195,8 @@ export default function SettingsPage() {
                 ["SMS Alerts", "Receive text messages", "sms"],
                 ["Marketing Emails", "Product news and tips", "marketing"],
               ] as const).map(([label, desc, key]) => (
-                <div key={key} className="flex items-center justify-between py-4 border-b" style={{ borderColor: "#FDE68A30" }}>
-                  <div>
+                <div key={key} className="flex flex-col gap-3 border-b py-4 sm:flex-row sm:items-center sm:justify-between" style={{ borderColor: "#FDE68A30" }}>
+                  <div className="min-w-0 pr-2">
                     <p className="text-sm" style={{ color: "#78350F", fontWeight: 700 }}>{label}</p>
                     <p className="text-xs" style={{ color: "#9CA3AF", fontWeight: 500 }}>{desc}</p>
                   </div>
@@ -232,12 +239,12 @@ export default function SettingsPage() {
                   />
                 </div>
               ))}
-              <div className="flex items-center justify-between py-4 border-t mt-2" style={{ borderColor: "#FDE68A30" }}>
-                <div>
+              <div className="mt-2 flex flex-col gap-3 border-t py-4 sm:flex-row sm:items-center sm:justify-between" style={{ borderColor: "#FDE68A30" }}>
+                <div className="min-w-0">
                   <p className="text-sm" style={{ color: "#78350F", fontWeight: 700 }}>Two-Factor Authentication</p>
                   <p className="text-xs" style={{ color: "#9CA3AF", fontWeight: 500 }}>Configure in Supabase / your identity provider</p>
                 </div>
-                <span className="px-4 py-1.5 rounded-full text-xs" style={{ background: "linear-gradient(135deg, #FEF3C7, #FDE68A)", color: "#D97706", fontWeight: 700 }}>See docs</span>
+                <span className="w-fit shrink-0 rounded-full px-4 py-1.5 text-xs" style={{ background: "linear-gradient(135deg, #FEF3C7, #FDE68A)", color: "#D97706", fontWeight: 700 }}>See docs</span>
               </div>
             </div>
           )}
@@ -246,13 +253,13 @@ export default function SettingsPage() {
             <div className="space-y-5">
               <h2 className="text-sm" style={{ color: "#78350F", fontWeight: 800 }}>Appearance</h2>
               <p className="text-sm" style={{ color: "#9CA3AF", fontWeight: 500 }}>Choose your preferred theme</p>
-              <div className="flex gap-5">
+              <div className="flex flex-wrap gap-4 sm:gap-5">
                 {[
                   { label: "Light", bg: "#FFFDF7", active: true },
                   { label: "Dark", bg: "#1F2937", active: false },
                   { label: "System", bg: "linear-gradient(135deg, #FFFDF7 50%, #1F2937 50%)", active: false },
                 ].map((t) => (
-                  <div key={t.label} className="text-center cursor-pointer group">
+                  <div key={t.label} className="group cursor-pointer text-center">
                     <div
                       className="w-24 h-16 rounded-xl border-2 mb-2 transition-all group-hover:scale-105"
                       style={{
@@ -272,14 +279,16 @@ export default function SettingsPage() {
             <button
               type="button"
               onClick={handleSave}
-              className="flex items-center gap-2 px-7 py-3 rounded-xl text-white text-sm cursor-pointer transition-all hover:scale-[1.02] active:scale-[0.98]"
+              disabled={saving}
+              className="inline-flex items-center gap-2 rounded-xl px-7 py-3 text-sm text-white transition-all hover:scale-[1.02] active:scale-[0.98] disabled:pointer-events-none disabled:opacity-60"
               style={{
                 background: saved ? "linear-gradient(135deg, #16A34A, #4ADE80)" : "linear-gradient(135deg, #D97706, #F59E0B)",
                 fontWeight: 700,
                 boxShadow: saved ? "0 4px 15px rgba(22,163,74,0.3)" : "0 4px 15px rgba(217,119,6,0.3)",
               }}
             >
-              <Save size={16} /> {saved ? "Saved!" : "Save Changes"}
+              {saving ? <Loader2 size={16} className="animate-spin" aria-hidden /> : <Save size={16} aria-hidden />}
+              {saving ? "Saving…" : saved ? "Saved!" : "Save Changes"}
             </button>
           </div>
         </div>

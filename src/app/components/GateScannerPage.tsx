@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { motion } from "motion/react";
-import { ScanLine, CheckCircle2, XCircle, Search, ShieldCheck, ShieldAlert } from "lucide-react";
+import { ScanLine, CheckCircle2, XCircle, Search, ShieldCheck, ShieldAlert, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase, isSupabaseConfigured } from "../../lib/supabase";
 import { useAuth } from "../auth/AuthContext";
@@ -26,6 +26,7 @@ export default function GateScannerPage() {
   const [manualId, setManualId] = useState("");
   const [lastResult, setLastResult] = useState<ScanRecord | null>(null);
   const [loading, setLoading] = useState(true);
+  const [scanSubmitting, setScanSubmitting] = useState(false);
 
   const loadRecent = useCallback(async () => {
     if (!isSupabaseConfigured || !user) return;
@@ -71,84 +72,88 @@ export default function GateScannerPage() {
 
   const handleManualScan = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!manualId.trim()) return;
     const code = manualId.trim();
+    if (!code || scanSubmitting) return;
+    setScanSubmitting(true);
+    try {
+      const { data: row, error } = await supabase
+        .from("issued_tickets")
+        .select("id, booking_code, buyer_name, checked_in_at, ticket_tiers ( tier_name, events ( name ) )")
+        .eq("booking_code", code)
+        .maybeSingle();
 
-    const { data: row, error } = await supabase
-      .from("issued_tickets")
-      .select("id, booking_code, buyer_name, checked_in_at, ticket_tiers ( tier_name, events ( name ) )")
-      .eq("booking_code", code)
-      .maybeSingle();
+      if (error) {
+        toast.error(error.message);
+        setManualId("");
+        return;
+      }
 
-    if (error) {
-      toast.error(error.message);
-      setManualId("");
-      return;
-    }
+      if (!row) {
+        const invalid: ScanRecord = {
+          id: code,
+          attendee: "Unknown",
+          event: "\u2014",
+          ticketType: "\u2014",
+          time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+          status: "Invalid",
+        };
+        setScans((prev) => [invalid, ...prev]);
+        setLastResult(invalid);
+        setManualId("");
+        return;
+      }
 
-    if (!row) {
-      const invalid: ScanRecord = {
-        id: code,
-        attendee: "Unknown",
-        event: "\u2014",
-        ticketType: "\u2014",
-        time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-        status: "Invalid",
+      const ticket = row as {
+        id: string;
+        booking_code: string;
+        buyer_name: string;
+        checked_in_at: string | null;
+        ticket_tiers: { tier_name: string; events: { name: string } | null } | null;
       };
-      setScans((prev) => [invalid, ...prev]);
-      setLastResult(invalid);
-      setManualId("");
-      return;
-    }
 
-    const ticket = row as {
-      id: string;
-      booking_code: string;
-      buyer_name: string;
-      checked_in_at: string | null;
-      ticket_tiers: { tier_name: string; events: { name: string } | null } | null;
-    };
+      if (ticket.checked_in_at) {
+        const used: ScanRecord = {
+          id: ticket.booking_code,
+          attendee: ticket.buyer_name,
+          event: ticket.ticket_tiers?.events?.name ?? "—",
+          ticketType: ticket.ticket_tiers?.tier_name ?? "—",
+          time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+          status: "Already Used",
+        };
+        setLastResult(used);
+        setManualId("");
+        return;
+      }
 
-    if (ticket.checked_in_at) {
-      const used: ScanRecord = {
+      const { error: upErr } = await supabase
+        .from("issued_tickets")
+        .update({ checked_in_at: new Date().toISOString() })
+        .eq("id", ticket.id);
+
+      if (upErr) {
+        toast.error(upErr.message);
+        setManualId("");
+        return;
+      }
+
+      const valid: ScanRecord = {
         id: ticket.booking_code,
         attendee: ticket.buyer_name,
         event: ticket.ticket_tiers?.events?.name ?? "—",
         ticketType: ticket.ticket_tiers?.tier_name ?? "—",
         time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-        status: "Already Used",
+        status: "Valid",
       };
-      setLastResult(used);
+      setLastResult(valid);
+      setScans((prev) => [
+        valid,
+        ...prev.filter((s) => s.id !== valid.id || s.status !== "Valid"),
+      ]);
       setManualId("");
-      return;
+      await loadRecent();
+    } finally {
+      setScanSubmitting(false);
     }
-
-    const { error: upErr } = await supabase
-      .from("issued_tickets")
-      .update({ checked_in_at: new Date().toISOString() })
-      .eq("id", ticket.id);
-
-    if (upErr) {
-      toast.error(upErr.message);
-      setManualId("");
-      return;
-    }
-
-    const valid: ScanRecord = {
-      id: ticket.booking_code,
-      attendee: ticket.buyer_name,
-      event: ticket.ticket_tiers?.events?.name ?? "—",
-      ticketType: ticket.ticket_tiers?.tier_name ?? "—",
-      time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-      status: "Valid",
-    };
-    setLastResult(valid);
-    setScans((prev) => [
-      valid,
-      ...prev.filter((s) => s.id !== valid.id || s.status !== "Valid"),
-    ]);
-    setManualId("");
-    await loadRecent();
   };
 
   const todayValid = scans.filter((s) => s.status === "Valid").length;
@@ -167,25 +172,28 @@ export default function GateScannerPage() {
           </div>
           <h2 className="text-sm mb-1" style={{ color: "#78350F", fontWeight: 800 }}>Manual Ticket Check</h2>
           <p className="text-xs mb-5" style={{ color: "#9CA3AF", fontWeight: 500 }}>Enter booking code (e.g. BK-AB12CD34EF)</p>
-          <form onSubmit={handleManualScan} className="w-full flex gap-2">
-            <div className="relative flex-1">
+          <form onSubmit={handleManualScan} className="flex w-full flex-col gap-2 sm:flex-row sm:items-stretch">
+            <div className="relative min-w-0 flex-1">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-amber-400" />
               <input
                 value={manualId}
+                disabled={scanSubmitting}
                 onChange={(e) => setManualId(e.target.value)}
                 placeholder="Booking code"
-                className="w-full pl-9 pr-3 py-3 rounded-xl border-2 text-sm outline-none transition-all"
+                className="w-full rounded-xl border-2 py-3 pl-9 pr-3 text-sm outline-none transition-all disabled:opacity-60"
                 style={{ backgroundColor: "#FFFEF7", borderColor: "#FDE68A", fontWeight: 500 }}
-                onFocus={(e) => (e.target.style.borderColor = "#D97706")}
+                onFocus={(e) => !scanSubmitting && (e.target.style.borderColor = "#D97706")}
                 onBlur={(e) => (e.target.style.borderColor = "#FDE68A")}
               />
             </div>
             <button
               type="submit"
-              className="px-5 py-3 rounded-xl text-white text-sm cursor-pointer hover:scale-[1.02] active:scale-[0.98] transition-all shrink-0"
+              disabled={scanSubmitting}
+              className="inline-flex shrink-0 cursor-pointer items-center justify-center gap-2 rounded-xl px-5 py-3 text-sm text-white transition-all hover:scale-[1.02] active:scale-[0.98] disabled:pointer-events-none disabled:opacity-60 sm:w-auto"
               style={{ background: "linear-gradient(135deg, #D97706, #F59E0B)", fontWeight: 700 }}
             >
-              Scan
+              {scanSubmitting ? <Loader2 size={18} className="animate-spin" aria-hidden /> : null}
+              {scanSubmitting ? "Scanning…" : "Scan"}
             </button>
           </form>
 
@@ -226,7 +234,7 @@ export default function GateScannerPage() {
         <div className="lg:col-span-2 bg-white rounded-2xl p-6" style={{ boxShadow: "0 2px 20px rgba(120,53,15,0.06)" }}>
           <h2 className="text-sm mb-5" style={{ color: "#78350F", fontWeight: 800 }}>Recent check-ins</h2>
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full min-w-[520px] text-sm">
               <thead>
                 <tr className="text-left border-b" style={{ borderColor: "#FDE68A40" }}>
                   {["Ticket ID", "Attendee", "Event", "Time", "Status"].map((h) => (

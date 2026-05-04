@@ -1,13 +1,22 @@
 import { useState, useEffect } from "react";
-import { useNavigate, Link } from "react-router";
-import { AlertCircle, Eye, EyeOff, Sparkles, Ticket, Zap } from "lucide-react";
+import { useNavigate, Link, useSearchParams } from "react-router";
+import { AlertCircle, Eye, EyeOff, Loader2, Sparkles, Ticket, Zap } from "lucide-react";
 import { motion } from "motion/react";
 import { useAuth } from "../auth/AuthContext";
 
 const F = "Nunito, sans-serif";
 
+function safeAppPath(path: string | null | undefined, fallback: string): string {
+  const p = path?.trim();
+  if (!p || !p.startsWith("/") || p.startsWith("//")) return fallback;
+  return p;
+}
+
 export default function LoginPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const postAuthPath = safeAppPath(searchParams.get("redirect"), "/dashboard");
+  const isInviteReturn = postAuthPath.startsWith("/invite/");
   const { signIn, session, loading: authLoading } = useAuth();
   const [showPassword, setShowPassword] = useState(false);
   const [email, setEmail] = useState("");
@@ -17,21 +26,25 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (!authLoading && session) {
-      navigate("/dashboard", { replace: true });
+      navigate(postAuthPath, { replace: true });
     }
-  }, [authLoading, session, navigate]);
+  }, [authLoading, session, navigate, postAuthPath]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submitting) return;
     setError(null);
     setSubmitting(true);
-    const { error: err } = await signIn(email.trim(), password);
-    setSubmitting(false);
-    if (err) {
-      setError(err.message);
-      return;
+    try {
+      const { error: err } = await signIn(email.trim(), password);
+      if (err) {
+        setError(err.message);
+        return;
+      }
+      navigate(postAuthPath);
+    } finally {
+      setSubmitting(false);
     }
-    navigate("/dashboard");
   };
 
   const errorBorder = error ? "#DC2626" : "#FDE68A";
@@ -97,7 +110,7 @@ export default function LoginPage() {
         </motion.div>
       </div>
 
-      <div className="flex-1 flex items-center justify-center p-8 relative" style={{ backgroundColor: "#FFFDF7" }}>
+      <div className="relative flex flex-1 items-center justify-center p-4 sm:p-8" style={{ backgroundColor: "#FFFDF7" }}>
         <div className="absolute inset-0 opacity-[0.03]" style={{ backgroundImage: "radial-gradient(#D97706 1px, transparent 1px)", backgroundSize: "24px 24px" }} />
 
         <motion.div
@@ -106,7 +119,7 @@ export default function LoginPage() {
           transition={{ duration: 0.6, delay: 0.2 }}
           className="w-full max-w-md relative z-10"
         >
-          <div className="bg-white rounded-3xl p-10" style={{ boxShadow: "0 4px 40px rgba(120,53,15,0.08), 0 1px 3px rgba(0,0,0,0.05)" }}>
+          <div className="rounded-3xl bg-white p-6 sm:p-10" style={{ boxShadow: "0 4px 40px rgba(120,53,15,0.08), 0 1px 3px rgba(0,0,0,0.05)" }}>
             <div className="flex items-center justify-center gap-2 mb-8">
               <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: "linear-gradient(135deg, #D97706, #F59E0B)" }}>
                 <Ticket size={20} className="text-white" />
@@ -120,6 +133,15 @@ export default function LoginPage() {
             <p className="text-center text-sm mb-7" style={{ color: "#9CA3AF", fontWeight: 500 }}>
               Sign in with your Supabase account. Your role is set at signup.
             </p>
+
+            {isInviteReturn && (
+              <div
+                className="mb-6 rounded-2xl border-2 px-4 py-3 text-center text-xs"
+                style={{ borderColor: "#FDE68A", background: "#FFFBEB", color: "#78350F", fontWeight: 600 }}
+              >
+                You&apos;re finishing an event invite. After sign in, your invite will be accepted automatically (attendee accounts only).
+              </div>
+            )}
 
             <form onSubmit={handleLogin} className="space-y-5">
               <div>
@@ -181,9 +203,10 @@ export default function LoginPage() {
               <button
                 type="submit"
                 disabled={submitting}
-                className="w-full py-3.5 rounded-xl text-white text-sm cursor-pointer transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-60 disabled:pointer-events-none"
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl py-3.5 text-sm text-white transition-all hover:scale-[1.02] active:scale-[0.98] disabled:pointer-events-none disabled:opacity-60"
                 style={{ background: "linear-gradient(135deg, #D97706, #F59E0B)", fontWeight: 700, boxShadow: "0 4px 15px rgba(217,119,6,0.35)" }}
               >
+                {submitting ? <Loader2 size={18} className="animate-spin" aria-hidden /> : null}
                 {submitting ? "Signing in…" : "Login"}
               </button>
             </form>
@@ -196,7 +219,11 @@ export default function LoginPage() {
 
             <p className="text-center text-sm" style={{ color: "#9CA3AF", fontWeight: 500 }}>
               Don&apos;t have an account?{" "}
-              <Link to="/signup" className="hover:underline" style={{ color: "#D97706", fontWeight: 700 }}>
+              <Link
+                to={searchParams.get("redirect") ? `/signup?redirect=${encodeURIComponent(searchParams.get("redirect")!)}` : "/signup"}
+                className="hover:underline"
+                style={{ color: "#D97706", fontWeight: 700 }}
+              >
                 Sign Up
               </Link>
             </p>

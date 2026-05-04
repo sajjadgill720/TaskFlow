@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { motion } from "motion/react";
-import { Ticket, Copy, Check, Plus, X, ShoppingCart, CheckCircle2, Download, LayoutDashboard } from "lucide-react";
+import { Ticket, Copy, Check, Plus, X, ShoppingCart, CheckCircle2, Download, LayoutDashboard, Loader2 } from "lucide-react";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
+import { apiUrl } from "../../lib/apiBaseUrl";
 import { supabase, isSupabaseConfigured } from "../../lib/supabase";
 import { useAuth } from "../auth/AuthContext";
 
@@ -47,6 +48,8 @@ export default function SellTicketsPage() {
   const [buyerName, setBuyerName] = useState("");
   const [buyerEmail, setBuyerEmail] = useState("");
   const [confirmed, setConfirmed] = useState<Booking | null>(null);
+  const [addingTicket, setAddingTicket] = useState(false);
+  const [bookingSaving, setBookingSaving] = useState(false);
 
   const load = useCallback(async () => {
     if (!isSupabaseConfigured || !user) return;
@@ -94,71 +97,76 @@ export default function SellTicketsPage() {
 
   const handleBook = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!bookingTicket) return;
+    if (!bookingTicket || bookingSaving) return;
     const row = tickets.find((t) => t.id === bookingTicket.id);
     if (!row || row.status !== "On Sale" || row.sold >= row.total) {
       toast.error("This tier is not available.");
       return;
     }
 
-    const { data: tierRow, error: fetchErr } = await supabase
-      .from("ticket_tiers")
-      .select("id, sold, quantity, price_cents, tier_name, events ( name )")
-      .eq("id", bookingTicket.id)
-      .single();
-    if (fetchErr || !tierRow) {
-      toast.error(fetchErr?.message ?? "Tier not found");
-      return;
+    setBookingSaving(true);
+    try {
+      const { data: tierRow, error: fetchErr } = await supabase
+        .from("ticket_tiers")
+        .select("id, sold, quantity, price_cents, tier_name, events ( name )")
+        .eq("id", bookingTicket.id)
+        .single();
+      if (fetchErr || !tierRow) {
+        toast.error(fetchErr?.message ?? "Tier not found");
+        return;
+      }
+
+      const tr = tierRow as {
+        id: string;
+        sold: number;
+        quantity: number;
+        price_cents: number;
+        tier_name: string;
+        events: { name: string } | null;
+      };
+
+      if (tr.sold >= tr.quantity) {
+        toast.error("Sold out");
+        return;
+      }
+
+      const bookingId = `BK-${crypto.randomUUID().replace(/-/g, "").slice(0, 10).toUpperCase()}`;
+      const amount = formatPrice(tr.price_cents);
+      const payload = `${bookingId}|${tr.events?.name ?? ""}|${tr.tier_name}|${buyerEmail}`;
+      const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(payload)}`;
+
+      const { error: insErr } = await supabase.from("issued_tickets").insert({
+        tier_id: tr.id,
+        booking_code: bookingId,
+        buyer_name: buyerName,
+        buyer_email: buyerEmail,
+        qr_payload: payload,
+      });
+      if (insErr) {
+        toast.error(insErr.message);
+        return;
+      }
+
+      const { error: upErr } = await supabase.from("ticket_tiers").update({ sold: tr.sold + 1 }).eq("id", tr.id);
+      if (upErr) {
+        toast.error(upErr.message);
+        return;
+      }
+
+      setConfirmed({
+        id: bookingId,
+        event: tr.events?.name ?? "—",
+        tier: tr.price_cents <= 0 ? "Free" : "Paid",
+        amount: tr.price_cents <= 0 ? "Free" : amount,
+        qrUrl,
+      });
+      setBookingTicket(null);
+      setBuyerName("");
+      setBuyerEmail("");
+      await load();
+    } finally {
+      setBookingSaving(false);
     }
-
-    const tr = tierRow as {
-      id: string;
-      sold: number;
-      quantity: number;
-      price_cents: number;
-      tier_name: string;
-      events: { name: string } | null;
-    };
-
-    if (tr.sold >= tr.quantity) {
-      toast.error("Sold out");
-      return;
-    }
-
-    const bookingId = `BK-${crypto.randomUUID().replace(/-/g, "").slice(0, 10).toUpperCase()}`;
-    const amount = formatPrice(tr.price_cents);
-    const payload = `${bookingId}|${tr.events?.name ?? ""}|${tr.tier_name}|${buyerEmail}`;
-    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(payload)}`;
-
-    const { error: insErr } = await supabase.from("issued_tickets").insert({
-      tier_id: tr.id,
-      booking_code: bookingId,
-      buyer_name: buyerName,
-      buyer_email: buyerEmail,
-      qr_payload: payload,
-    });
-    if (insErr) {
-      toast.error(insErr.message);
-      return;
-    }
-
-    const { error: upErr } = await supabase.from("ticket_tiers").update({ sold: tr.sold + 1 }).eq("id", tr.id);
-    if (upErr) {
-      toast.error(upErr.message);
-      return;
-    }
-
-    setConfirmed({
-      id: bookingId,
-      event: tr.events?.name ?? "—",
-      tier: tr.price_cents <= 0 ? "Free" : "Paid",
-      amount: tr.price_cents <= 0 ? "Free" : amount,
-      qrUrl,
-    });
-    setBookingTicket(null);
-    setBuyerName("");
-    setBuyerEmail("");
-    await load();
   };
 
   const downloadTicket = () => {
@@ -176,14 +184,16 @@ export default function SellTicketsPage() {
   };
 
   const copyLink = (id: string) => {
-    navigator.clipboard.writeText(`${window.location.origin}/dashboard/sell-tickets?tier=${id}`);
+    navigator.clipboard.writeText(apiUrl(`/dashboard/sell-tickets?tier=${encodeURIComponent(id)}`));
     setCopiedId(id);
     setTimeout(() => setCopiedId(null), 2000);
   };
 
   const handleCreate = async (ev: React.FormEvent) => {
     ev.preventDefault();
-    if (!user) return;
+    if (!user || addingTicket) return;
+    setAddingTicket(true);
+    try {
     const { data: evMatch, error: evErr } = await supabase
       .from("events")
       .select("id")
@@ -216,6 +226,9 @@ export default function SellTicketsPage() {
     setForm({ event: "", type: "", price: "", total: "" });
     setShowModal(false);
     await load();
+    } finally {
+      setAddingTicket(false);
+    }
   };
 
   return (
@@ -239,7 +252,7 @@ export default function SellTicketsPage() {
 
       <div className="bg-white rounded-2xl overflow-hidden" style={{ boxShadow: "0 2px 20px rgba(120,53,15,0.06)" }}>
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full min-w-[640px] text-sm">
             <thead>
               <tr className="text-left border-b" style={{ borderColor: "#FDE68A40" }}>
                 {["Event", "Ticket Type", "Price", "Sold", "Status", "Share", "Book"].map((h) => (
@@ -304,16 +317,21 @@ export default function SellTicketsPage() {
       )}
 
       {showModal && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
           <motion.div
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="bg-white rounded-3xl w-full max-w-md p-7"
+            className="max-h-[min(90dvh,640px)] w-full max-w-md overflow-y-auto rounded-3xl bg-white p-6 sm:p-7"
             style={{ boxShadow: "0 20px 60px rgba(0,0,0,0.15)" }}
           >
-            <div className="flex items-center justify-between mb-6">
+            <div className="mb-6 flex items-center justify-between">
               <h2 className="text-lg" style={{ color: "#78350F", fontWeight: 800 }}>Add Ticket Type</h2>
-              <button type="button" onClick={() => setShowModal(false)} className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-amber-50 text-gray-400 hover:text-gray-600 cursor-pointer">
+              <button
+                type="button"
+                disabled={addingTicket}
+                onClick={() => setShowModal(false)}
+                className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-gray-400 hover:bg-amber-50 hover:text-gray-600 disabled:pointer-events-none disabled:opacity-40"
+              >
                 <X size={18} />
               </button>
             </div>
@@ -328,22 +346,25 @@ export default function SellTicketsPage() {
                   <label className="block text-sm mb-2" style={{ color: "#78350F", fontWeight: 700 }}>{f.label}</label>
                   <input
                     required
+                    disabled={addingTicket}
                     value={(form as Record<string, string>)[f.key]}
                     onChange={(e) => setForm({ ...form, [f.key]: e.target.value })}
                     placeholder={f.placeholder}
-                    className="w-full px-4 py-3 rounded-xl border-2 text-sm outline-none transition-all"
+                    className="w-full rounded-xl border-2 px-4 py-3 text-sm outline-none transition-all disabled:opacity-60"
                     style={{ backgroundColor: "#FFFEF7", borderColor: "#FDE68A", fontWeight: 500 }}
-                    onFocus={(e) => (e.target.style.borderColor = "#D97706")}
+                    onFocus={(e) => !addingTicket && (e.target.style.borderColor = "#D97706")}
                     onBlur={(e) => (e.target.style.borderColor = "#FDE68A")}
                   />
                 </div>
               ))}
               <button
                 type="submit"
-                className="w-full py-3 rounded-xl text-white text-sm cursor-pointer transition-all hover:scale-[1.02] active:scale-[0.98]"
+                disabled={addingTicket}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm text-white transition-all hover:scale-[1.02] active:scale-[0.98] disabled:pointer-events-none disabled:opacity-60"
                 style={{ background: "linear-gradient(135deg, #D97706, #F59E0B)", fontWeight: 700, boxShadow: "0 4px 15px rgba(217,119,6,0.35)" }}
               >
-                Add Ticket
+                {addingTicket ? <Loader2 size={18} className="animate-spin" aria-hidden /> : null}
+                {addingTicket ? "Adding…" : "Add Ticket"}
               </button>
             </form>
           </motion.div>
@@ -351,16 +372,21 @@ export default function SellTicketsPage() {
       )}
 
       {bookingTicket && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
           <motion.div
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="bg-white rounded-3xl w-full max-w-md p-7"
+            className="max-h-[min(90dvh,640px)] w-full max-w-md overflow-y-auto rounded-3xl bg-white p-6 sm:p-7"
             style={{ boxShadow: "0 20px 60px rgba(0,0,0,0.15)" }}
           >
-            <div className="flex items-center justify-between mb-2">
+            <div className="mb-2 flex items-center justify-between">
               <h2 className="text-lg" style={{ color: "#78350F", fontWeight: 800 }}>Book Ticket</h2>
-              <button type="button" onClick={() => setBookingTicket(null)} className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-amber-50 text-gray-400 hover:text-gray-600 cursor-pointer">
+              <button
+                type="button"
+                disabled={bookingSaving}
+                onClick={() => setBookingTicket(null)}
+                className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-gray-400 hover:bg-amber-50 hover:text-gray-600 disabled:pointer-events-none disabled:opacity-40"
+              >
                 <X size={18} />
               </button>
             </div>
@@ -372,25 +398,34 @@ export default function SellTicketsPage() {
               <div>
                 <label className="block text-sm mb-2" style={{ color: "#78350F", fontWeight: 700 }}>Full Name</label>
                 <input
-                  required value={buyerName} onChange={(e) => setBuyerName(e.target.value)}
-                  className="w-full px-4 py-3 rounded-xl border-2 text-sm outline-none"
+                  required
+                  disabled={bookingSaving}
+                  value={buyerName}
+                  onChange={(e) => setBuyerName(e.target.value)}
+                  className="w-full rounded-xl border-2 px-4 py-3 text-sm outline-none disabled:opacity-60"
                   style={{ backgroundColor: "#FFFEF7", borderColor: "#FDE68A", fontWeight: 500 }}
                 />
               </div>
               <div>
                 <label className="block text-sm mb-2" style={{ color: "#78350F", fontWeight: 700 }}>Email</label>
                 <input
-                  required type="email" value={buyerEmail} onChange={(e) => setBuyerEmail(e.target.value)}
-                  className="w-full px-4 py-3 rounded-xl border-2 text-sm outline-none"
+                  required
+                  type="email"
+                  disabled={bookingSaving}
+                  value={buyerEmail}
+                  onChange={(e) => setBuyerEmail(e.target.value)}
+                  className="w-full rounded-xl border-2 px-4 py-3 text-sm outline-none disabled:opacity-60"
                   style={{ backgroundColor: "#FFFEF7", borderColor: "#FDE68A", fontWeight: 500 }}
                 />
               </div>
               <button
                 type="submit"
-                className="w-full py-3 rounded-xl text-white text-sm cursor-pointer transition-all hover:scale-[1.02] active:scale-[0.98]"
+                disabled={bookingSaving}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm text-white transition-all hover:scale-[1.02] active:scale-[0.98] disabled:pointer-events-none disabled:opacity-60"
                 style={{ background: "linear-gradient(135deg, #D97706, #F59E0B)", fontWeight: 700, boxShadow: "0 4px 15px rgba(217,119,6,0.35)" }}
               >
-                Confirm Booking
+                {bookingSaving ? <Loader2 size={18} className="animate-spin" aria-hidden /> : null}
+                {bookingSaving ? "Processing…" : "Confirm Booking"}
               </button>
             </form>
           </motion.div>
@@ -398,12 +433,12 @@ export default function SellTicketsPage() {
       )}
 
       {confirmed && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
           <motion.div
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
             data-testid="booking-confirmed"
-            className="bg-white rounded-3xl w-full max-w-md p-8"
+            className="max-h-[min(92dvh,720px)] w-full max-w-md overflow-y-auto rounded-3xl bg-white p-6 sm:p-8"
             style={{ boxShadow: "0 20px 60px rgba(0,0,0,0.15)" }}
           >
             <div className="flex justify-center">
@@ -419,11 +454,11 @@ export default function SellTicketsPage() {
               <div className="flex justify-between"><span className="text-gray-500" style={{ fontWeight: 500 }}>Booking ID:</span><span style={{ color: "#78350F", fontWeight: 700 }}>{confirmed.id}</span></div>
             </div>
             <div className="mt-6 flex justify-center">
-              <div className="p-3 rounded-xl border-2" style={{ borderColor: "#16A34A" }} data-testid="booking-qr">
-                <img src={confirmed.qrUrl} alt="Ticket QR" width={170} height={170} />
+              <div className="rounded-xl border-2 p-3" style={{ borderColor: "#16A34A" }} data-testid="booking-qr">
+                <img src={confirmed.qrUrl} alt="Ticket QR" width={170} height={170} className="h-auto max-w-full" />
               </div>
             </div>
-            <div className="mt-6 flex gap-3">
+            <div className="mt-6 flex flex-col gap-3 sm:flex-row">
               <button
                 type="button"
                 onClick={downloadTicket}

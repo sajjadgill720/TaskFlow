@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { Calendar, Ticket, DollarSign, Users, ArrowRight } from "lucide-react";
-import { useNavigate } from "react-router";
+import { Calendar, Ticket, DollarSign, Users, ArrowRight, Compass, QrCode, X } from "lucide-react";
+import { Link, useNavigate } from "react-router";
 import { motion } from "motion/react";
 import { PieChart, Pie, Cell, Legend, ResponsiveContainer } from "recharts";
 import { format, parseISO } from "date-fns";
@@ -19,6 +19,7 @@ type EventRow = {
 
 type IssuedRow = {
   booking_code: string;
+  qr_payload: string | null;
   checked_in_at: string | null;
   created_at: string;
   ticket_tiers: {
@@ -27,6 +28,12 @@ type IssuedRow = {
     events: { name: string; event_date: string } | null;
   } | null;
 };
+
+/** Same pattern as Sell Tickets — encodes payload for gate scanners. */
+function ticketQrImageUrl(qrPayload: string | null | undefined, bookingCode: string) {
+  const data = qrPayload?.trim() ? qrPayload.trim() : bookingCode;
+  return `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(data)}`;
+}
 
 const statusColors: Record<string, { bg: string; text: string }> = {
   Active: { bg: "#DCFCE7", text: "#16A34A" },
@@ -50,6 +57,7 @@ export default function DashboardHome() {
   const [totalIssued, setTotalIssued] = useState(0);
   const [donutData, setDonutData] = useState<{ name: string; value: number }[]>([]);
   const [myTickets, setMyTickets] = useState<IssuedRow[]>([]);
+  const [ticketModal, setTicketModal] = useState<IssuedRow | null>(null);
 
   const firstName = profile?.full_name?.split(/\s+/)[0] || user?.email?.split("@")[0] || "there";
 
@@ -101,6 +109,7 @@ export default function DashboardHome() {
       .select(
         `
         booking_code,
+        qr_payload,
         checked_in_at,
         created_at,
         ticket_tiers ( tier_name, price_cents, events ( name, event_date ) )
@@ -145,10 +154,18 @@ export default function DashboardHome() {
   if (!staffRole(profile.role)) {
     return (
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
-        <div className="rounded-2xl p-6 mb-8 relative overflow-hidden" style={{ background: "linear-gradient(135deg, #78350F 0%, #B45309 50%, #D97706 100%)" }}>
+        <div className="relative mb-8 overflow-hidden rounded-2xl p-5 sm:p-6" style={{ background: "linear-gradient(135deg, #78350F 0%, #B45309 50%, #D97706 100%)" }}>
           <div className="relative z-10">
-            <h1 className="text-2xl text-white mb-1" style={{ fontWeight: 800 }}>Hi, {firstName}!</h1>
+            <h1 className="text-xl text-white mb-1 sm:text-2xl" style={{ fontWeight: 800 }}>Hi, {firstName}!</h1>
             <p className="text-white/60 text-sm" style={{ fontWeight: 500 }}>Your tickets and check-in status.</p>
+            <Link
+              to="/dashboard/explore"
+              className="mt-4 inline-flex items-center gap-2 rounded-xl bg-white/15 px-4 py-2.5 text-sm text-white backdrop-blur-sm transition-colors hover:bg-white/25"
+              style={{ fontWeight: 700 }}
+            >
+              <Compass size={16} aria-hidden />
+              Explore organizers &amp; buy tickets
+            </Link>
           </div>
         </div>
 
@@ -159,46 +176,170 @@ export default function DashboardHome() {
             <p className="text-sm" style={{ color: "#9CA3AF", fontWeight: 600 }}>No tickets yet. When an organizer books with your email, they appear here.</p>
           </div>
         ) : (
-          <div className="bg-white rounded-2xl overflow-hidden" style={{ boxShadow: "0 2px 20px rgba(120,53,15,0.06)" }}>
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left border-b" style={{ borderColor: "#FDE68A40" }}>
-                  {["Event", "Tier", "Booking", "Check-in"].map((h) => (
-                    <th key={h} className="px-5 py-4 text-xs" style={{ fontWeight: 700, color: "#B45309" }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {myTickets.map((t) => {
-                  const ev = t.ticket_tiers?.events;
-                  const dateLabel = ev?.event_date
-                    ? format(parseISO(ev.event_date), "MMM d, yyyy")
-                    : "—";
-                  return (
-                    <tr key={t.booking_code} className="border-b border-gray-50">
-                      <td className="px-5 py-4" style={{ color: "#78350F", fontWeight: 700 }}>
-                        {ev?.name ?? "—"}
-                        <div className="text-xs font-normal text-gray-400">{dateLabel}</div>
-                      </td>
-                      <td className="px-5 py-4" style={{ color: "#6B7280", fontWeight: 500 }}>{t.ticket_tiers?.tier_name ?? "—"}</td>
-                      <td className="px-5 py-4 font-mono text-xs" style={{ color: "#78350F", fontWeight: 700 }}>{t.booking_code}</td>
-                      <td className="px-5 py-4">
-                        <span
-                          className="px-3 py-1 rounded-full text-xs"
-                          style={{
-                            fontWeight: 700,
-                            backgroundColor: t.checked_in_at ? "#DCFCE7" : "#FEF3C7",
-                            color: t.checked_in_at ? "#16A34A" : "#D97706",
-                          }}
-                        >
-                          {t.checked_in_at ? "Checked in" : "Not checked in"}
-                        </span>
-                      </td>
+          <>
+            <div className="space-y-3 sm:hidden">
+              {myTickets.map((t) => {
+                const ev = t.ticket_tiers?.events;
+                const dateLabel = ev?.event_date
+                  ? format(parseISO(ev.event_date), "MMM d, yyyy")
+                  : "—";
+                return (
+                  <div
+                    key={t.booking_code}
+                    className="rounded-2xl border border-amber-100/80 bg-white p-4"
+                    style={{ boxShadow: "0 2px 20px rgba(120,53,15,0.06)" }}
+                  >
+                    <p className="text-sm" style={{ color: "#78350F", fontWeight: 800 }}>{ev?.name ?? "—"}</p>
+                    <p className="text-xs text-gray-400">{dateLabel}</p>
+                    <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-amber-50 pt-3">
+                      <span className="text-xs" style={{ color: "#6B7280", fontWeight: 600 }}>{t.ticket_tiers?.tier_name ?? "—"}</span>
+                      <span className="font-mono text-xs break-all" style={{ color: "#78350F", fontWeight: 700 }}>{t.booking_code}</span>
+                    </div>
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <span
+                        className="inline-block rounded-full px-3 py-1 text-xs"
+                        style={{
+                          fontWeight: 700,
+                          backgroundColor: t.checked_in_at ? "#DCFCE7" : "#FEF3C7",
+                          color: t.checked_in_at ? "#16A34A" : "#D97706",
+                        }}
+                      >
+                        {t.checked_in_at ? "Checked in" : "Not checked in"}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setTicketModal(t)}
+                        className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs text-white"
+                        style={{ background: "linear-gradient(135deg, #D97706, #F59E0B)", fontWeight: 700 }}
+                      >
+                        <QrCode size={14} aria-hidden />
+                        View QR ticket
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="hidden overflow-hidden rounded-2xl bg-white sm:block" style={{ boxShadow: "0 2px 20px rgba(120,53,15,0.06)" }}>
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[520px] text-sm">
+                  <thead>
+                    <tr className="border-b text-left" style={{ borderColor: "#FDE68A40" }}>
+                      {["Event", "Tier", "Booking", "Check-in", "Ticket"].map((h) => (
+                        <th key={h} className="px-5 py-4 text-xs" style={{ fontWeight: 700, color: "#B45309" }}>{h}</th>
+                      ))}
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                  </thead>
+                  <tbody>
+                    {myTickets.map((t) => {
+                      const ev = t.ticket_tiers?.events;
+                      const dateLabel = ev?.event_date
+                        ? format(parseISO(ev.event_date), "MMM d, yyyy")
+                        : "—";
+                      return (
+                        <tr key={t.booking_code} className="border-b border-gray-50">
+                          <td className="max-w-[200px] px-5 py-4" style={{ color: "#78350F", fontWeight: 700 }}>
+                            <span className="line-clamp-2">{ev?.name ?? "—"}</span>
+                            <div className="text-xs font-normal text-gray-400">{dateLabel}</div>
+                          </td>
+                          <td className="px-5 py-4" style={{ color: "#6B7280", fontWeight: 500 }}>{t.ticket_tiers?.tier_name ?? "—"}</td>
+                          <td className="px-5 py-4 font-mono text-xs" style={{ color: "#78350F", fontWeight: 700 }}>{t.booking_code}</td>
+                          <td className="px-5 py-4">
+                            <span
+                              className="rounded-full px-3 py-1 text-xs"
+                              style={{
+                                fontWeight: 700,
+                                backgroundColor: t.checked_in_at ? "#DCFCE7" : "#FEF3C7",
+                                color: t.checked_in_at ? "#16A34A" : "#D97706",
+                              }}
+                            >
+                              {t.checked_in_at ? "Checked in" : "Not checked in"}
+                            </span>
+                          </td>
+                          <td className="px-5 py-4">
+                            <button
+                              type="button"
+                              onClick={() => setTicketModal(t)}
+                              className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs text-white transition-opacity hover:opacity-90"
+                              style={{ background: "linear-gradient(135deg, #D97706, #F59E0B)", fontWeight: 700 }}
+                            >
+                              <QrCode size={14} aria-hidden />
+                              View QR
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </>
+        )}
+
+        {ticketModal && (
+          <div
+            role="presentation"
+            className="fixed inset-0 z-[100] flex items-center justify-center bg-black/45 p-4 backdrop-blur-sm"
+            onClick={() => setTicketModal(null)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.96 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="relative w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl"
+              style={{ boxShadow: "0 20px 60px rgba(0,0,0,0.18)" }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                type="button"
+                onClick={() => setTicketModal(null)}
+                className="absolute right-4 top-4 flex h-9 w-9 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-amber-50 hover:text-gray-700"
+                aria-label="Close"
+              >
+                <X size={18} />
+              </button>
+              <h2 className="pr-10 text-lg" style={{ color: "#78350F", fontWeight: 800 }}>Your ticket</h2>
+              {(() => {
+                const ev = ticketModal.ticket_tiers?.events;
+                const dateLabel = ev?.event_date ? format(parseISO(ev.event_date), "EEEE, MMM d, yyyy") : "—";
+                return (
+                  <div className="mt-4 space-y-1 text-sm">
+                    <p style={{ color: "#78350F", fontWeight: 700 }}>{ev?.name ?? "Event"}</p>
+                    <p className="text-xs text-gray-500">{dateLabel}</p>
+                    <p className="text-xs" style={{ color: "#6B7280", fontWeight: 600 }}>
+                      {ticketModal.ticket_tiers?.tier_name ?? "—"} ·{" "}
+                      <span className="font-mono" style={{ color: "#78350F" }}>{ticketModal.booking_code}</span>
+                    </p>
+                  </div>
+                );
+              })()}
+              <div className="mt-5 flex justify-center">
+                <div className="rounded-2xl border-2 p-3" style={{ borderColor: "#FDE68A" }}>
+                  <img
+                    src={ticketQrImageUrl(ticketModal.qr_payload, ticketModal.booking_code)}
+                    alt="Ticket QR code"
+                    width={240}
+                    height={240}
+                    className="h-auto max-w-full"
+                  />
+                </div>
+              </div>
+              <p className="mt-4 text-center text-xs text-gray-500" style={{ fontWeight: 500 }}>
+                Show this code at the gate. Screenshot or save this screen if you are offline.
+              </p>
+              <div className="mt-4 flex justify-center">
+                <span
+                  className="rounded-full px-3 py-1 text-xs"
+                  style={{
+                    fontWeight: 700,
+                    backgroundColor: ticketModal.checked_in_at ? "#DCFCE7" : "#FEF3C7",
+                    color: ticketModal.checked_in_at ? "#16A34A" : "#D97706",
+                  }}
+                >
+                  {ticketModal.checked_in_at ? "Checked in" : "Not checked in yet"}
+                </span>
+              </div>
+            </motion.div>
           </div>
         )}
       </motion.div>
@@ -237,11 +378,11 @@ export default function DashboardHome() {
 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
-      <div className="rounded-2xl p-6 mb-8 relative overflow-hidden" style={{ background: "linear-gradient(135deg, #78350F 0%, #B45309 50%, #D97706 100%)" }}>
+      <div className="relative mb-8 overflow-hidden rounded-2xl p-5 sm:p-6" style={{ background: "linear-gradient(135deg, #78350F 0%, #B45309 50%, #D97706 100%)" }}>
         <div className="absolute top-[-30px] right-[-30px] w-40 h-40 rounded-full opacity-15" style={{ background: "#FCD34D" }} />
-        <div className="absolute bottom-[-20px] right-20 w-24 h-24 rounded-2xl rotate-45 opacity-10" style={{ background: "#fff" }} />
+        <div className="absolute bottom-[-20px] right-20 w-24 h-24 rotate-45 rounded-2xl opacity-10" style={{ background: "#fff" }} />
         <div className="relative z-10">
-          <h1 className="text-2xl text-white mb-1" style={{ fontWeight: 800 }}>Welcome back, {firstName}!</h1>
+          <h1 className="text-xl text-white mb-1 sm:text-2xl" style={{ fontWeight: 800 }}>Welcome back, {firstName}!</h1>
           <p className="text-white/60 text-sm" style={{ fontWeight: 500 }}>
             {loading ? "Loading your workspace…" : "Here is what is happening with your events."}
           </p>
@@ -277,10 +418,10 @@ export default function DashboardHome() {
               View All <ArrowRight size={12} />
             </button>
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+          <div className="overflow-x-auto -mx-1 px-1 sm:mx-0 sm:px-0">
+            <table className="w-full min-w-[480px] text-sm">
               <thead>
-                <tr className="text-left border-b" style={{ borderColor: "#FDE68A40" }}>
+                <tr className="border-b text-left" style={{ borderColor: "#FDE68A40" }}>
                   {["Event Name", "Date", "Tickets Sold", "Status"].map((h) => (
                     <th key={h} className="pb-3 text-xs" style={{ fontWeight: 700, color: "#B45309" }}>{h}</th>
                   ))}
@@ -333,11 +474,11 @@ export default function DashboardHome() {
         </div>
       </div>
 
-      <div className="flex gap-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:gap-4">
         <button
           type="button"
           onClick={() => navigate("/dashboard/events")}
-          className="px-7 py-3 rounded-xl text-white text-sm cursor-pointer transition-all hover:scale-[1.02] active:scale-[0.98] flex items-center gap-2"
+          className="flex items-center justify-center gap-2 rounded-xl px-7 py-3 text-sm text-white transition-all hover:scale-[1.02] active:scale-[0.98] sm:justify-start"
           style={{ background: "linear-gradient(135deg, #D97706, #F59E0B)", fontWeight: 700, boxShadow: "0 4px 15px rgba(217,119,6,0.3)" }}
         >
           My Events <ArrowRight size={16} />
@@ -345,7 +486,7 @@ export default function DashboardHome() {
         <button
           type="button"
           onClick={() => navigate("/dashboard/analytics")}
-          className="px-7 py-3 rounded-xl text-sm border-2 cursor-pointer hover:bg-amber-50 transition-all flex items-center gap-2"
+          className="flex items-center justify-center gap-2 rounded-xl border-2 px-7 py-3 text-sm transition-all hover:bg-amber-50 sm:justify-start"
           style={{ borderColor: "#D97706", color: "#D97706", fontWeight: 700 }}
         >
           View Reports

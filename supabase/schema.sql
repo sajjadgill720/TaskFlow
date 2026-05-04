@@ -251,6 +251,10 @@ create policy "issued_update_checkin"
     )
   );
 
+-- Attendee-scoped events (subscribe + per-event invites): run after this file:
+--   supabase/migrations/20260204130000_attendee_subscribe_invite.sql
+-- It replaces the broad "attendees read all events" policies with subscription + invite grants.
+
 -- Optional seed (comment out if not needed)
 -- Sign up through the app first, then note your user id from auth.users and run:
 -- insert into public.events (organizer_id, name, event_date, location, status)

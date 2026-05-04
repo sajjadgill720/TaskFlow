@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { motion } from "motion/react";
-import { Plus, Search, MapPin, CalendarDays, X, Sparkles } from "lucide-react";
+import { Plus, Search, MapPin, CalendarDays, X, Sparkles, Loader2, Link2 } from "lucide-react";
 import { format, parseISO } from "date-fns";
 import { toast } from "sonner";
+import { apiUrl } from "../../lib/apiBaseUrl";
 import { supabase, isSupabaseConfigured } from "../../lib/supabase";
 import { useAuth } from "../auth/AuthContext";
 
@@ -72,6 +73,8 @@ export default function MyEventsPage() {
   const [showModal, setShowModal] = useState(false);
   const [newEvent, setNewEvent] = useState({ name: "", date: "", location: "", totalTickets: "", price: "" });
   const [tiers, setTiers] = useState<TicketTier[]>(defaultTiers);
+  const [publishing, setPublishing] = useState(false);
+  const [inviteBusyId, setInviteBusyId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!isSupabaseConfigured || !user) return;
@@ -110,7 +113,9 @@ export default function MyEventsPage() {
 
   const handleCreate = async (ev: React.FormEvent) => {
     ev.preventDefault();
-    if (!user) return;
+    if (!user || publishing) return;
+    setPublishing(true);
+    try {
     const enabledTiers = tiers.filter((t) => t.enabled);
     const totalFromTiers = enabledTiers.reduce((sum, t) => sum + t.quantity, 0);
     const totalTickets = totalFromTiers || Number(newEvent.totalTickets) || 100;
@@ -153,6 +158,30 @@ export default function MyEventsPage() {
     setTiers(defaultTiers);
     setShowModal(false);
     await load();
+    } finally {
+      setPublishing(false);
+    }
+  };
+
+  const copyEventInviteLink = async (eventId: string) => {
+    if (!isSupabaseConfigured || inviteBusyId) return;
+    setInviteBusyId(eventId);
+    try {
+      const token =
+        typeof crypto !== "undefined" && crypto.randomUUID
+          ? `${crypto.randomUUID().replace(/-/g, "")}${crypto.randomUUID().replace(/-/g, "")}`.slice(0, 48)
+          : `${Date.now()}-${Math.random().toString(36).slice(2, 14)}`;
+      const { error } = await supabase.from("event_invite_tokens").insert({ event_id: eventId, token });
+      if (error) {
+        toast.error(error.message);
+        return;
+      }
+      const url = apiUrl(`/invite/${token}`);
+      await navigator.clipboard.writeText(url);
+      toast.success("Invite link copied. Attendees only see this event after they open it.");
+    } finally {
+      setInviteBusyId(null);
+    }
   };
 
   return (
@@ -189,13 +218,13 @@ export default function MyEventsPage() {
             onBlur={(e) => (e.target.style.borderColor = "#FDE68A")}
           />
         </div>
-        <div className="flex gap-2 p-1 rounded-xl" style={{ backgroundColor: "#FEF3C7" }}>
+        <div className="flex flex-wrap gap-1 rounded-xl p-1 sm:gap-2" style={{ backgroundColor: "#FEF3C7" }}>
           {["All", "Active", "Upcoming", "Closed"].map((f) => (
             <button
               key={f}
               type="button"
               onClick={() => setFilter(f)}
-              className="px-4 py-2 rounded-lg text-sm cursor-pointer transition-all"
+              className="cursor-pointer rounded-lg px-3 py-2 text-xs transition-all sm:px-4 sm:text-sm"
               style={{
                 fontWeight: 700,
                 backgroundColor: filter === f ? "#D97706" : "transparent",
@@ -251,6 +280,16 @@ export default function MyEventsPage() {
                 }}
               />
             </div>
+            <button
+              type="button"
+              disabled={inviteBusyId === ev.id}
+              onClick={() => void copyEventInviteLink(ev.id)}
+              className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border-2 py-2.5 text-xs transition-colors disabled:opacity-50"
+              style={{ borderColor: "#FDE68A", color: "#B45309", fontWeight: 700 }}
+            >
+              <Link2 size={14} aria-hidden />
+              {inviteBusyId === ev.id ? "Creating link…" : "Copy attendee invite link (single event)"}
+            </button>
           </motion.div>
         ))}
       </div>
@@ -263,16 +302,21 @@ export default function MyEventsPage() {
       )}
 
       {showModal && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
           <motion.div
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="bg-white rounded-3xl w-full max-w-md p-7"
+            className="max-h-[min(90dvh,720px)] w-full max-w-md overflow-y-auto rounded-3xl bg-white p-6 sm:p-7"
             style={{ boxShadow: "0 20px 60px rgba(0,0,0,0.15)" }}
           >
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-lg" style={{ color: "#78350F", fontWeight: 800 }}>Create New Event</h2>
-              <button type="button" onClick={() => setShowModal(false)} className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-amber-50 text-gray-400 hover:text-gray-600 cursor-pointer">
+              <button
+                type="button"
+                disabled={publishing}
+                onClick={() => setShowModal(false)}
+                className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-gray-400 hover:bg-amber-50 hover:text-gray-600 disabled:pointer-events-none disabled:opacity-40"
+              >
                 <X size={18} />
               </button>
             </div>
@@ -288,53 +332,58 @@ export default function MyEventsPage() {
                   <input
                     type={f.type}
                     required={f.key === "name"}
+                    disabled={publishing}
                     value={(newEvent as Record<string, string>)[f.key]}
                     onChange={(e) => setNewEvent({ ...newEvent, [f.key]: e.target.value })}
                     placeholder={f.placeholder}
-                    className="w-full px-4 py-3 rounded-xl border-2 text-sm outline-none transition-all"
+                    className="w-full rounded-xl border-2 px-4 py-3 text-sm outline-none transition-all disabled:opacity-60"
                     style={{ backgroundColor: "#FFFEF7", borderColor: "#FDE68A", fontWeight: 500 }}
-                    onFocus={(e) => (e.target.style.borderColor = "#D97706")}
+                    onFocus={(e) => !publishing && (e.target.style.borderColor = "#D97706")}
                     onBlur={(e) => (e.target.style.borderColor = "#FDE68A")}
                   />
                 </div>
               ))}
               <div>
                 <label className="block text-sm mb-2" style={{ color: "#78350F", fontWeight: 700 }}>Ticket Tiers</label>
-                <div className="rounded-xl overflow-hidden border-2" style={{ borderColor: "#FDE68A" }}>
+                <div className="overflow-x-auto rounded-xl border-2" style={{ borderColor: "#FDE68A" }}>
+                  <div className="min-w-[280px]">
                   <div className="grid grid-cols-[1fr_1fr_1fr_auto] gap-2 px-3 py-2" style={{ background: "#FEF3C7" }}>
                     {["Tier", "Price (USD)", "Quantity", "On"].map((h) => (
                       <div key={h} className="text-xs" style={{ color: "#92400E", fontWeight: 800 }}>{h}</div>
                     ))}
                   </div>
                   {tiers.map((t, i) => (
-                    <div key={t.name} className="grid grid-cols-[1fr_1fr_1fr_auto] gap-2 px-3 py-2 items-center border-t" style={{ borderColor: "#FDE68A60" }}>
+                    <div key={t.name} className="grid grid-cols-[1fr_1fr_1fr_auto] items-center gap-2 border-t px-3 py-2" style={{ borderColor: "#FDE68A60" }}>
                       <div className="text-sm" style={{ color: "#78350F", fontWeight: 700 }}>{t.name}</div>
                       <input
                         type="number"
                         min={0}
                         step={0.01}
-                        disabled={t.name === "Free"}
+                        disabled={publishing || t.name === "Free"}
                         value={t.name === "Free" ? 0 : t.price}
                         onChange={(e) => updateTier(i, { price: Number(e.target.value) })}
-                        className="px-2 py-1.5 rounded-lg border text-xs outline-none disabled:bg-gray-50"
+                        className="rounded-lg border px-2 py-1.5 text-xs outline-none disabled:bg-gray-50"
                         style={{ borderColor: "#FDE68A", fontWeight: 600 }}
                       />
                       <input
                         type="number"
                         min={0}
+                        disabled={publishing}
                         value={t.quantity}
                         onChange={(e) => updateTier(i, { quantity: Number(e.target.value) })}
-                        className="px-2 py-1.5 rounded-lg border text-xs outline-none"
+                        className="rounded-lg border px-2 py-1.5 text-xs outline-none disabled:opacity-60"
                         style={{ borderColor: "#FDE68A", fontWeight: 600 }}
                       />
                       <input
                         type="checkbox"
+                        disabled={publishing}
                         checked={t.enabled}
                         onChange={(e) => updateTier(i, { enabled: e.target.checked })}
-                        className="w-4 h-4 cursor-pointer accent-amber-500"
+                        className="h-4 w-4 cursor-pointer accent-amber-500 disabled:cursor-not-allowed"
                       />
                     </div>
                   ))}
+                  </div>
                 </div>
                 <p className="text-[10px] mt-1" style={{ color: "#9CA3AF", fontWeight: 500 }}>Paid/VIP prices are in dollars (stored as cents in the database).</p>
               </div>
@@ -342,10 +391,12 @@ export default function MyEventsPage() {
               <button
                 type="submit"
                 data-testid="publish-event"
-                className="w-full py-3 rounded-xl text-white text-sm cursor-pointer transition-all hover:scale-[1.02] active:scale-[0.98]"
+                disabled={publishing}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm text-white transition-all hover:scale-[1.02] active:scale-[0.98] disabled:pointer-events-none disabled:opacity-60"
                 style={{ background: "linear-gradient(135deg, #D97706, #F59E0B)", fontWeight: 700, boxShadow: "0 4px 15px rgba(217,119,6,0.35)" }}
               >
-                Publish Event
+                {publishing ? <Loader2 size={18} className="animate-spin" aria-hidden /> : null}
+                {publishing ? "Publishing…" : "Publish Event"}
               </button>
             </form>
           </motion.div>
